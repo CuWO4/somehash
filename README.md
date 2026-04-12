@@ -16,6 +16,8 @@ gen_pbox.py: OK
 gen_sbox.py: OK
 ```
 
+takes 27.188s to process a 7.0 GB file (263MB/s) on my system (AMD Ryzen 9 8945HX, ZHITAITiPlus5000 3500MB/s seq read).
+
 ## Usage
 
 ```bash
