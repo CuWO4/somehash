@@ -1,0 +1,7 @@
+debug/
+tmp/
+.*
+
+*.py
+
+!.gitignore
