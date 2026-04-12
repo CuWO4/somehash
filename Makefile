@@ -2,7 +2,7 @@ TARGET_NAME := somehashsum
 RUNARGS ?=
 
 EXT := cpp
-CXX := g++
+CXX := clang++
 
 ifeq ($(MAKECMDGOALS),gdb)
 	OPTIMIZE := -O0
@@ -21,7 +21,7 @@ else
 endif
 
 # set -MMD -MP to generate dependent files #
-CXXFLAGS := -Wall $(OPTIMIZE) $(GENSYMBOL) -MMD -MP 
+CXXFLAGS := -Wall $(OPTIMIZE) $(GENSYMBOL) -MMD -MP --std=c++17
 LDFLAGS := $(GENSYMBOL)
 LDLIBS := 
 
