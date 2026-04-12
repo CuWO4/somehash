@@ -35,7 +35,7 @@ command line argument meaning stay consistent with md5sum.
 - **SPN round function**: Each round applies an 8‑bit S‑box (substitution), a bitwise permutation (P‑box), a linear mixing step, and a multiplication by round constant.
 - **S‑box properties**: 8×8 S‑box derived from the GF(256) inverse with seed b'114514'; nonlinearity 112, differential uniformity 4, no fixed points.
 - **P‑box properties**: 128‑bit single cycle permutation with an average displacement distance of 50.02, generated from `/dev/urandom`.
-- **Round constant**: state multiplied by the $\frac{2^{128}}{\phi}$ $\times$ round index in round function to avoid symmetry (where $\phi=\frac{\sqrt 5 - 1}{2}$ is the golden ratio).
+- **Round constant**: state multiplied by the $\frac{2^{128}}{\phi}$ $\times$ round index in round function to avoid symmetry (where $\phi=\frac{\sqrt 5 + 1}{2}$ is the golden ratio).
 - **Initialization vector**: `STATE0` randomly generated from `/dev/urandom`.
 - **Finalization**: After processing all blocks, the total bit length is XORed into the state (both low and high 64‑bit halves), followed by one full round function to produce the hash.
 
