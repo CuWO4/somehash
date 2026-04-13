@@ -15,6 +15,7 @@ const uint256_t H0 = uint256_t(0x33804c69e3392e42, 0xb4ee7b3011acfdd3, 0xcbd7835
 const uint256_t STATE0 = uint256_t(0x69879d90d86d7e20, 0x384230e4dc4235d9, 0x7666b78504e22efe, 0x6eca294b409e4d04);
  // 2^256 / phi
 const uint256_t PHI_INV = uint256_t(0x9e3779b97f4a7c15,  0xf39cc0605cedc834, 0x1082276bf3a2725, 0x1f86c6a11d0c18e9);
+constexpr int32_t NR_FINALIZING_ROUND = 32;
 
 std::string exename;
 int ret = 0;
@@ -28,6 +29,80 @@ int output_error(const char* msg_fmt, ...) {
   fprintf(stderr, "\n");
   ret = 1;
   return 0;
+}
+
+uint256_t replace_with_sbox(uint256_t state) {
+  static constexpr int32_t NR_SBOX_BITS = 8;
+  static constexpr uint32_t SBOX_MASK = (1 << NR_SBOX_BITS) - 1;
+  // generated with GF(2^8) inv with seed = b'114514', nonlinearity=112, diff. uniformity=4, no fixed point
+  static constexpr uint8_t SBOX[] = {
+    0x52, 0xf8, 0xef, 0xe4, 0x92, 0xe6, 0x59, 0x23, 0x5a, 0xc1, 0xed, 0x4f, 0x99, 0xb4, 0xbb, 0xd9,
+    0x8b, 0x96, 0x28, 0xce, 0x26, 0xde, 0x42, 0x07, 0x91, 0x17, 0x39, 0x04, 0x0a, 0x13, 0x66, 0xaa,
+    0xb2, 0x3a, 0xa2, 0x72, 0x70, 0xf2, 0x1b, 0xa1, 0xe5, 0x25, 0x8c, 0x31, 0xc5, 0x1c, 0x6c, 0x7c,
+    0x48, 0xb6, 0xfb, 0x09, 0x41, 0x2b, 0x7e, 0x20, 0xeb, 0x60, 0x03, 0x90, 0x12, 0x44, 0x3b, 0x7a,
+    0x75, 0xa0, 0x53, 0xd4, 0xe2, 0x6f, 0x7d, 0xac, 0xc9, 0x4d, 0x82, 0x0d, 0xda, 0xa6, 0xf0, 0xbc,
+    0xff, 0x9e, 0xf7, 0x38, 0x58, 0x0c, 0x98, 0x4b, 0xd0, 0xbd, 0x30, 0xd8, 0x7f, 0x55, 0xe8, 0x02,
+    0xa8, 0xad, 0x8d, 0x10, 0xfd, 0x63, 0xf9, 0x8a, 0xd7, 0x85, 0x62, 0x5b, 0x5c, 0x51, 0xa9, 0x18,
+    0x6a, 0x0f, 0x5e, 0xab, 0x94, 0x3c, 0xee, 0x8e, 0xa5, 0x84, 0x89, 0x6e, 0xf5, 0xaf, 0xa4, 0x3d,
+    0x97, 0xfc, 0x56, 0x0e, 0xf4, 0x1d, 0xe1, 0xe9, 0x15, 0xb0, 0x6d, 0x67, 0x4e, 0x61, 0x77, 0x50,
+    0xf1, 0x35, 0xf6, 0xa3, 0xcd, 0x79, 0x01, 0xb7, 0x74, 0x9b, 0x1a, 0x4a, 0x36, 0xc2, 0xe0, 0xbf,
+    0x05, 0xcf, 0x7b, 0xd6, 0xdc, 0xdd, 0xe7, 0x57, 0x3f, 0x0b, 0xa7, 0x64, 0x37, 0x88, 0xba, 0x71,
+    0x19, 0x1e, 0x46, 0xcc, 0x3e, 0x21, 0xc0, 0x2e, 0xfa, 0x76, 0xb8, 0x24, 0x78, 0xd2, 0x32, 0x43,
+    0x8f, 0x47, 0xd1, 0xc6, 0xfe, 0x86, 0x11, 0x80, 0xb1, 0x95, 0x4c, 0x5d, 0x49, 0x93, 0x14, 0x22,
+    0xf3, 0xc4, 0x27, 0xdb, 0xea, 0x54, 0x2d, 0x69, 0xc7, 0xd3, 0x40, 0x2c, 0x29, 0x9c, 0xc8, 0x9f,
+    0x33, 0xb3, 0xb5, 0xc3, 0x73, 0x2a, 0x9d, 0xbe, 0x16, 0x6b, 0x1f, 0x87, 0x34, 0xd5, 0xec, 0x00,
+    0x08, 0x9a, 0x81, 0xca, 0x06, 0x2f, 0xcb, 0x45, 0x68, 0x83, 0x65, 0x5f, 0xae, 0xe3, 0xb9, 0xdf,
+  };
+
+  uint256_t res = 0;
+  for (int i = 0; i < 256; i += NR_SBOX_BITS) {
+    res |= (uint256_t) SBOX[(state >> i).u64_0() & SBOX_MASK] << i;
+  }
+  return res;
+}
+
+uint256_t shuffle_with_pbox(uint256_t state) {
+  // use /dev/urandom as seed, selected until no fix point, single cycle and
+  // average bit switch distance = 96.38
+  static constexpr uint16_t PBOX[] = {
+    252, 162, 152,  59, 181, 118, 228, 103, 231, 141, 209, 133,  95,  23, 126, 195,
+    240, 217, 187,  65, 242,  96, 219, 218, 237,  18,  47,  43, 138, 125, 190,  44,
+    149, 136,  85,  60,  70, 121, 142, 143, 234, 166,  97,  52, 148, 173, 176,  38,
+    153, 194, 227,  88, 250, 251, 223, 254, 253,  99, 120, 168, 236,  41, 146, 102,
+    215, 245, 208, 122, 244,  80,  54, 246, 243,  58, 101, 134, 235, 249,  25,  33,
+    184, 172, 206,  93, 165, 216,  48,  30, 123, 151,  16,  11, 183, 175,  45,   1,
+    204, 232, 202, 221, 129, 135, 164, 127,  74, 171, 140,   0,  57,  72, 182, 119,
+    174,  78, 198,  63,  40,  49,  90, 192, 150, 131,  81, 230, 111, 145,  87,   4,
+     75, 200,  73,  71, 197, 238,  19, 239, 205,  55, 170,  91,  98, 211, 109,  24,
+    159, 139, 193, 201,  37,  53,  84, 214, 163, 199,   7, 213,   5,  94,  26, 160,
+     62, 255,  66,  21, 207,  67, 112,  22, 247,  92, 180, 229, 189,  36, 241, 179,
+    132, 248, 177,   3,  10,  64, 113,  89, 107, 147,  28, 104, 114, 100, 128, 161,
+    115,   6,  86,  14, 106,  31, 154, 233,  15,  34, 117, 157,  56, 203, 108,  83,
+      8, 224, 186, 144,  35,  51, 222, 155, 116, 105, 212,  17,  76,  46,  32, 226,
+    225, 137,   9, 188,  29, 185,  39,  42, 196,   2, 158, 156, 178, 167, 110, 220,
+     20, 210,  13, 130, 169,  69,  79,  50,  61,  27,  82,  12, 191,  77, 124,  68,
+  };
+
+  static bool pbox_inited = false;
+  static uint256_t pbox_fast_table[32][256];
+
+  if (!pbox_inited) {
+    for (int i = 0; i < 32; ++i) {
+      for (int v = 0; v < 256; ++v) {
+        pbox_fast_table[i][v] = 0;
+        for (int j = 0; j < 8; ++j) {
+          pbox_fast_table[i][v] |= (uint256_t) ((v >> j) & 0x1) << PBOX[i * 8 + j];
+        }
+      }
+    }
+    pbox_inited = true;
+  }
+
+  uint256_t res = 0;
+  for (int i = 0; i < 32; i++) {
+    res |= pbox_fast_table[i][(state >> i * 8).u64_0() & 0xFF];
+  }
+  return res;
 }
 
 template<typename T>
@@ -66,12 +141,16 @@ uint256_t do_nonlinear(uint256_t chain, uint256_t state) {
 }
 
 uint256_t round_func(uint256_t chain, uint256_t state) {
+  state = replace_with_sbox(state);
+  state = shuffle_with_pbox(state);
   for (int32_t r = 0; r < NR_ROUND; r++) {
     state = do_nonlinear(chain, state);
     state += rotshl(state, 13) ^ rotshl(state, 57) ^ rotshl(state, 131);
     state ^= rotshl(state, 173) ^ rotshl(state, 199);
     state ^= PHI_INV * (r + 1);
   }
+  state = replace_with_sbox(state);
+  state = shuffle_with_pbox(state);
   return state;
 }
 
@@ -97,6 +176,7 @@ uint256_t compress(FILE* input_fp, std::string filename, int& error) {
 
       state ^= byte;
       state += rotshl(state, 13) ^ rotshl(state, 57) ^ rotshl(state, 173);
+      state ^= PHI_INV * (i + 1);
     }
 
     (h += round_func(h, state)) ^= PHI_INV * (b + 1);
@@ -104,10 +184,10 @@ uint256_t compress(FILE* input_fp, std::string filename, int& error) {
   }
 
 
-  h ^= ((uint256_t) bit_len << 128) | bit_len;
+  h += round_func(h, bit_len);
 
-  for (int i = 0; i < 8; i++) {
-    h = round_func(h, h);
+  for (int i = 0; i < NR_FINALIZING_ROUND; i++) {
+    h += round_func(h, h);
   }
 
   error = 0;
