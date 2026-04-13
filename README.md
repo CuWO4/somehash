@@ -30,41 +30,35 @@ command line argument meaning stay consistent with md5sum/sha1sum/sha256sum.
 $ python3 avalanche_test.py
 test times: 1000
 message length: 10 bytes
-bits flipped mean: 128.0300
-bits flipped std: 7.8476
-
+bits flipped mean: 127.1300
+bits flipped std: 8.2641
 test times: 1000
 message length: 50 bytes
-bits flipped mean: 128.0300
-bits flipped std: 7.3880
-
+bits flipped mean: 127.0500
+bits flipped std: 8.0774
 test times: 1000
 message length: 500 bytes
-bits flipped mean: 127.9533
-bits flipped std: 7.5703
-
+bits flipped mean: 127.2367
+bits flipped std: 7.8740
 test times: 1000
 message length: 1000 bytes
-bits flipped mean: 128.0925
-bits flipped std: 7.8468
-
+bits flipped mean: 127.6225
+bits flipped std: 8.0384
 test times: 1000
 message length: 2000 bytes
-bits flipped mean: 127.7860
-bits flipped std: 7.9288
-
+bits flipped mean: 128.0400
+bits flipped std: 8.0784
 test times: 1000
 message length: 4000 bytes
-bits flipped mean: 127.6183
-bits flipped std: 7.7222
-
+bits flipped mean: 128.0817
+bits flipped std: 8.2252
 test times: 1000
 message length: 8000 bytes
-bits flipped mean: 127.7400
-bits flipped std: 7.8020
+bits flipped mean: 128.1771
+bits flipped std: 8.1249
 ```
 
-it takes 2.665s to process a 95.52MB file (35.8MB/s) on my system (AMD Ryzen 9 8945HX).
+it takes 0.565s to process a 95.52MB file (169.1MB/s) on my system (AMD Ryzen 9 8945HX).
 
 ## Detail
 
@@ -76,7 +70,6 @@ it takes 2.665s to process a 95.52MB file (35.8MB/s) on my system (AMD Ryzen 9 8
 - **Round constant**: state XORed with $\frac{2^{256}}{\phi} \times (r+1)$ in each round to avoid symmetry (where $\phi=\frac{\sqrt 5 + 1}{2}$ is the golden ratio).
 - **Initialization vectors**: `H0` and `STATE0` randomly generated from `/dev/urandom`.
 - **Finalization**: After processing all blocks, the total number of bytes (as a 64‑bit integer) is XORed into both the lower and upper 128 bits of the state, followed by eight applications of the round function to produce the final hash.
-
 
 ## Compile
 
