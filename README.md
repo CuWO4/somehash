@@ -28,37 +28,43 @@ command line argument meaning stay consistent with md5sum/sha1sum/sha256sum.
 
 ```bash
 $ python3 avalanche_test.py
-test times: 1000
 message length: 10 bytes
 bits flipped mean: 127.1300
 bits flipped std: 8.2641
 test times: 1000
+
 message length: 50 bytes
 bits flipped mean: 127.0500
 bits flipped std: 8.0774
 test times: 1000
+
 message length: 500 bytes
 bits flipped mean: 127.2367
 bits flipped std: 7.8740
 test times: 1000
+
 message length: 1000 bytes
 bits flipped mean: 127.6225
 bits flipped std: 8.0384
 test times: 1000
+
 message length: 2000 bytes
 bits flipped mean: 128.0400
 bits flipped std: 8.0784
 test times: 1000
+
 message length: 4000 bytes
 bits flipped mean: 128.0817
 bits flipped std: 8.2252
 test times: 1000
+
 message length: 8000 bytes
 bits flipped mean: 128.1771
 bits flipped std: 8.1249
+test times: 1000
 ```
 
-it takes 0.565s to process a 95.52MB file (169.1MB/s) on my system (AMD Ryzen 9 8945HX).
+it takes 5.805s to process a 975.97MB single file (168.1MB/s) on my system (AMD Ryzen 9 8945HX), and the program automatically use $\text{max}(1, \lfloor\frac 3 4\times\text{＃vCPU}\rfloor )$ of vCPU for multithread compression.
 
 ## Detail
 
@@ -67,6 +73,8 @@ it takes 0.565s to process a 95.52MB file (169.1MB/s) on my system (AMD Ryzen 9 
 - **Streaming support**: Accepts `-` as a filename to read from standard input, enabling pipeline use.
 - **Merkel Damgard structure**: each block is compressed independently, then `h = round_func(h, block)` is executed.
 - **SPN and ARX mixing round function**: In round function, applies S-box and P-box at the beginning, then each of the 64 rounds applies a nonlinear mixing step using `ch` and `maj` functions, XOR with a round constant, and rotation‑based mixing, then applies S-box and P-box and the end.
+- **S‑box properties**: 8×8 S‑box derived from the GF(2^8) inverse with seed b'114514'; nonlinearity = 112, differential uniformity = 4, no fixed points.
+- **P‑box properties**: 128‑bit single cycle permutation with an average displacement distance of 96.38, use true random source `/dev/urandom` as seed.
 - **Round constant**: state XORed with $\frac{2^{256}}{\phi} \times (r+1)$ in each round to avoid symmetry (where $\phi=\frac{\sqrt 5 + 1}{2}$ is the golden ratio).
 - **Initialization vectors**: `H0` and `STATE0` randomly generated from `/dev/urandom`.
 - **Finalization**: After processing all blocks, the total number of bytes (as a 64‑bit integer) is XORed into both the lower and upper 128 bits of the state, followed by eight applications of the round function to produce the final hash.

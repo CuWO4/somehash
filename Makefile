@@ -20,10 +20,16 @@ else
 	OS_SUFFIX := -$(shell uname -r)
 endif
 
+ifeq ($(OS),Windows_NT)
+	THREAD_FLAGS :=
+else
+	THREAD_FLAGS := -pthread
+endif
+
 # set -MMD -MP to generate dependent files #
-CXXFLAGS := -Wall $(OPTIMIZE) $(GENSYMBOL) -MMD -MP --std=c++17
-LDFLAGS := $(GENSYMBOL)
-LDLIBS := 
+CXXFLAGS := -Wall $(OPTIMIZE) $(GENSYMBOL) -MMD -MP --std=c++17 $(THREAD_FLAGS)
+LDFLAGS := $(GENSYMBOL) $(THREAD_FLAGS)
+LDLIBS :=
 
 TMPDIR_BASE := tmp
 DEBUGDIR_BASE := debug

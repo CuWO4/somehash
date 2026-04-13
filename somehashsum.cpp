@@ -5,6 +5,8 @@
 #include <cinttypes>
 #include <filesystem>
 #include <cstdarg>
+#include <atomic>
+#include <thread>
 
 #include "uint256_t.h"
 
@@ -18,16 +20,40 @@ const uint256_t PHI_INV = uint256_t(0x9e3779b97f4a7c15,  0xf39cc0605cedc834, 0x1
 constexpr int32_t NR_FINALIZING_ROUND = 8;
 
 std::string exename;
-int ret = 0;
+std::atomic<int> ret{0};
+
+struct output_lock_guard {
+  static std::atomic_flag output_busy;
+
+  output_lock_guard() {
+    while (output_busy.test_and_set(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  }
+
+  ~output_lock_guard() {
+    output_busy.clear(std::memory_order_release);
+  }
+};
+std::atomic_flag output_lock_guard::output_busy = ATOMIC_FLAG_INIT;
 
 int output_error(const char* msg_fmt, ...) {
+  output_lock_guard _;
   fprintf(stderr, "%s: ", exename.c_str());
   va_list args;
   va_start(args, msg_fmt);
   vfprintf(stderr, msg_fmt, args);
   va_end(args);
   fprintf(stderr, "\n");
-  ret = 1;
+  ret.store(1, std::memory_order_relaxed);
+  return 0;
+}
+
+int output_line(uint256_t hash, std::string filename) {
+  output_lock_guard _;
+  // TODO: use `ls --quoting=shell-escape` style to escape filename
+  fprintf(stdout, "%016" PRIx64 "%016" PRIx64 "%016" PRIx64 "%016" PRIx64 "  %s\n",
+    hash.u64_3(), hash.u64_2(), hash.u64_1(), hash.u64_0(), filename.c_str());
   return 0;
 }
 
@@ -206,13 +232,6 @@ uint256_t compress(FILE* input_fp, std::string filename, int& error) {
   return h;
 }
 
-int output_line(uint256_t hash, std::string filename) {
-  // TODO: use `ls --quoting=shell-escape` style to escape filename
-  fprintf(stdout, "%016" PRIx64 "%016" PRIx64 "%016" PRIx64 "%016" PRIx64 "  %s\n",
-    hash.u64_3(), hash.u64_2(), hash.u64_1(), hash.u64_0(), filename.c_str());
-  return 0;
-}
-
 struct CheckLine {
   uint256_t hash; std::string filename;
 };
@@ -253,11 +272,92 @@ FILE* fopen_with_log(const char* filename, const char* mode) {
     output_error("`%s` is a dir.", filename);
     return nullptr;
   }
-  FILE* fp = fopen(filename, mode);
+  FILE* fp = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&fp, filename, mode) != 0) fp = nullptr;
+#else
+  fp = fopen(filename, mode);
+#endif
   if (fp == nullptr) {
     output_error("cannot open or read file `%s`.", filename);
   }
   return fp;
+}
+
+struct FileWithName {
+  FILE* fp;
+  std::string name;
+};
+
+std::size_t worker_count() {
+  unsigned int cpu_count = std::thread::hardware_concurrency();
+  std::size_t count = cpu_count == 0 ? 1 : (cpu_count * 3) / 4;
+  if (count == 0) count = 1;
+  return count;
+}
+
+void handle_check(const std::vector<FileWithName>& checksum_files) {
+  std::vector<CheckLine> files;
+  for (auto& checksum_file : checksum_files) {
+    auto parsed = analysis_checksum_file(checksum_file.fp);
+    files.insert(files.end(), parsed.begin(), parsed.end());
+  }
+
+  std::atomic_size_t next_task{0};
+  std::size_t threads_nr = worker_count();
+  std::vector<std::thread> threads;
+  threads.reserve(threads_nr);
+
+  for (std::size_t i = 0; i < threads_nr; ++i) {
+    threads.emplace_back([&]() {
+      while (true) {
+        std::size_t task = next_task.fetch_add(1, std::memory_order_relaxed);
+        if (task >= files.size()) break;
+
+        auto& file = files[task];
+        FILE* fp = fopen_with_log(file.filename.c_str(), "rb");
+        if (fp == nullptr) continue;
+
+        int error = 0;
+        uint256_t hash = compress(fp, file.filename, error);
+        fclose(fp);
+        if (!error) {
+          output_lock_guard _;
+          fprintf(stdout, "%s: %s\n", file.filename.c_str(), hash == file.hash ? "OK" : "FAILED");
+        }
+        if (error || hash != file.hash) ret.store(1, std::memory_order_relaxed);
+      }
+    });
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
+}
+
+void handle_compress(const std::vector<FileWithName>& input_files) {
+  std::atomic_size_t next_task{0};
+  std::size_t threads_nr = worker_count();
+  std::vector<std::thread> threads;
+  threads.reserve(threads_nr);
+
+  for (std::size_t i = 0; i < threads_nr; ++i) {
+    threads.emplace_back([&]() {
+      while (true) {
+        std::size_t task = next_task.fetch_add(1, std::memory_order_relaxed);
+        if (task >= input_files.size()) break;
+
+        auto& file = input_files[task];
+        int error = 0;
+        auto hash = compress(file.fp, file.name, error);
+        if (!error) output_line(hash, file.name);
+      }
+    });
+  }
+
+  for (auto& thread : threads) {
+    thread.join();
+  }
 }
 
 int main(int argc, char** argv) {
@@ -268,7 +368,6 @@ int main(int argc, char** argv) {
   bool escape_mode = false;
   bool check_mode = false;
 
-  struct FileWithName { FILE* fp; std::string name; };
   std::vector<FileWithName> input_files;
 
   for(shift(); argc; shift()) {
@@ -292,32 +391,17 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (ret == 0 && input_files.size() == 0) input_files.push_back({stdin, "-"});
+  if (ret.load(std::memory_order_relaxed) == 0 && input_files.size() == 0) input_files.push_back({stdin, "-"});
 
   if (check_mode) {
-    for (auto& checksum_file : input_files) {
-      auto files = analysis_checksum_file(checksum_file.fp);
-      for (auto file : files) {
-        FILE* fp = fopen_with_log(file.filename.c_str(), "rb");
-        if (fp == nullptr) continue;
-        int error = 0;
-        uint256_t hash = compress(fp, file.filename, error);
-        if (!error) fprintf(stdout, "%s: %s\n",
-          file.filename.c_str(), hash == file.hash ? "OK" : "FAILED");
-        ret |= error || hash != file.hash;
-      }
-    }
+    handle_check(input_files);
   } else {
-    for (auto& file : input_files) {
-      int error = 0;
-      auto hash = compress(file.fp, file.name, error);
-      if (!error) output_line(hash, file.name);
-    }
+    handle_compress(input_files);
   }
 
   for (auto& input_file : input_files) {
     if (input_file.fp && input_file.fp != stdin) fclose(input_file.fp);
   }
 
-  return ret;
+  return ret.load(std::memory_order_relaxed);
 }
