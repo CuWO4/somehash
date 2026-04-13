@@ -78,6 +78,7 @@ uint256_t round_func(uint256_t chain, uint256_t state) {
 uint256_t compress(FILE* input_fp, std::string filename, int& error) {
   uint256_t h = H0;
   uint64_t bit_len = 0;
+  uint8_t pad = 1;
 
   for (int b = 0; ; b++) {
     uint256_t state = STATE0;
@@ -86,8 +87,14 @@ uint256_t compress(FILE* input_fp, std::string filename, int& error) {
     bool end = false;
     for (int i = 0; i < BLOCK_SIZE; i++) {
       nr_read = fread(&byte, 1, 1, input_fp);
-      if (nr_read == 0) end = true;
-      bit_len += 8;
+      if (nr_read == 0) {
+        byte = pad;
+        pad = 0;
+        end = true;
+      } else {
+        bit_len += 8;
+      }
+
       state ^= byte;
       state += rotshl(state, 13) ^ rotshl(state, 57) ^ rotshl(state, 173);
     }
